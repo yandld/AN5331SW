@@ -1,7 +1,5 @@
 #include <stdint.h>
 #include <stdbool.h>
-
-//#include "common.h"
 #include "fsl_gpio.h"
 #include "swd_pin.h"
 
@@ -28,6 +26,12 @@
 #define PGin(n)    BITBAND_REG(PTG->PDIR, n)
 #endif
 
+static uint32_t swd_speed = 50;
+
+void set_swd_speed(int val)
+{
+    swd_speed = val;
+}
 
 void DOUT(uint32_t val)
 {
@@ -41,6 +45,7 @@ void SW_PinInit(void)
     DOUT(0);
     TCK(0);
     TRST(1);
+
 }
 
 void DDIR(uint32_t val)
@@ -59,20 +64,11 @@ void DDIR(uint32_t val)
 
 void DELAY_US(uint32_t us)
 {
-    volatile uint32_t i, j;
-
-    for (i = 0; i < us; i++)
+    volatile int i;
+    for(i=0; i<swd_speed; i++)
     {
-        for (j = 0; j < 30U; j++)
-        {
-            __NOP();
-        }
+        __NOP();
     }
-}
-
-void PIN_DELAY(void)
-{
- //   DELAY_US(1);
 }
 
 void TCK(uint32_t val)
@@ -89,26 +85,19 @@ uint32_t SW_READ_BIT(void)
 {
     uint32_t bit;
     TCK(0);
-    PIN_DELAY();
+    DELAY_US(1);
     bit = PBin(3);
     TCK(1);
-    PIN_DELAY();
+    DELAY_US(1);
     return bit;
-}
-
-void SW_CLOCK_CYCLE(void)
-{
-    TCK(0);
-    PIN_DELAY();
-    PIN_DELAY();
-    TCK(1);
-    PIN_DELAY();
-    PIN_DELAY();
 }
 
 void SW_WRITE_BIT(uint32_t bit)
 {
     DOUT(bit);
-    SW_CLOCK_CYCLE();
+    TCK(0);
+    DELAY_US(1);
+    TCK(1);
+    DELAY_US(1);
 }
 

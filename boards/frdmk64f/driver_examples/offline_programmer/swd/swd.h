@@ -83,6 +83,7 @@ uint8_t SWJ_WriteDP(uint8_t adr, uint32_t val);
 uint8_t SWJ_ReadAP(uint32_t adr, uint32_t *val);
 uint8_t SWJ_WriteAP(uint32_t adr, uint32_t val);
 uint8_t SWJ_InitDebug(void);
+int SWD_Disconnect(void);
 uint8_t SWJ_ReadMem(uint32_t addr, uint8_t *buf, uint32_t len);
 uint8_t SWJ_WriteMem(uint32_t addr, uint8_t *buf, uint32_t len);
 uint8_t SWJ_SetTargetState(TARGET_RESET_STATE state);

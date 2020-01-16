@@ -23,34 +23,26 @@ uint8_t target_flash_unlock_sequence(void)
     SWJ_ReadAP(MDM_IDR, &val);
     if ((val != KINETIS_KK_MCU_ID) && (val != KINETIS_KL_MCU_ID))
     {
+        printf("not Kinetis!\r\n");
         return CH_ERR;
     }
    
     SWJ_ReadAP(MDM_STATUS, &val);
-    if(val & (1<<5))
-    {
-        /* mess erase is enbaled */
-    }
-    else
-    {
-        /* mess erase is disabled */
-        return CH_MESS_ERASE_DISABLED;
-    }
     
     /* flash in secured mode */
-    if (val & (1 << 2))
+ //   if (val & (1 << 2))
     {
-        printf("secured Kinetis detected!\r\n");
-        TRST(0);
-        SWJ_WriteAP(MDM_CTRL, (1<<3));
+        printf("chip is secrued!\r\n");
         /* hold the device in reset */
-
-        if(SWJ_WriteAP(MDM_CTRL, (1<<0)|(1<<3)))
+        TRST(0);
+        if(SWJ_WriteAP(MDM_CTRL, (1<<0)))
         {
+            printf("launch mess erase failed\r\n");
             /* launch mess erase failed */
             return CH_ERR;
         }
-
+        
+        TRST(1);
         while (1)
         {
             /* wait until mass erase is started */
@@ -67,6 +59,7 @@ uint8_t target_flash_unlock_sequence(void)
             /* keep reading until procedure is complete */
             if(SWJ_ReadAP(MDM_CTRL, &val))
             {
+                printf("failed\r\n");
                  return CH_ERR;
             }
             if ((val & 0x01) == 0x00)
@@ -76,6 +69,10 @@ uint8_t target_flash_unlock_sequence(void)
         /* reset MDM-CTRL */
         SWJ_WriteAP(MDM_CTRL, 0);
     }
+//    else
+//    {
+//        printf("device is not in secure state\r\n");
+//    }
     
     /* halt MCU otherwise it loops in hard fault - WDOG reset cycle */
     TRST(0);
@@ -190,4 +187,5 @@ uint8_t target_flash_program_page(const target_flash_t* flash, uint32_t addr, ui
 
     return CH_OK;
 }
+
 

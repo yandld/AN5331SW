@@ -1,32 +1,4 @@
-/*
- * Copyright (c) 2015, Freescale Semiconductor, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * o Redistributions of source code must retain the above copyright notice, this list
- *   of conditions and the following disclaimer.
- *
- * o Redistributions in binary form must reproduce the above copyright notice, this
- *   list of conditions and the following disclaimer in the documentation and/or
- *   other materials provided with the distribution.
- *
- * o Neither the name of Freescale Semiconductor, Inc. nor the names of its
- *   contributors may be used to endorse or promote products derived from this
- *   software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,9 +20,6 @@
 #include "swd.h"
 #include "swd_pin.h"
 #include "flash_kinetis.h"
-/*******************************************************************************
- * Definitions
- ******************************************************************************/
 
 typedef struct
 {
@@ -73,12 +42,13 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"KL0/1/26/27",                 0x40047000u,    WDOG_TYPE_COP,   1024,   PGM4},
     {"xxFN1M",                      0x40052000u,    WDOG_TYPE_16,    4096,   PGM8},
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
+    {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
 };
 
 /* buffer size (in byte) for read/write operations */
 extern const target_flash_t flash;
 #define TARGET_PFLASH_IAMGE_PATH        "/PIMAGE.BIN"
-#define TARGET_DFLASH_IAMGE_PATH        "/DIMAGE.BIN"
+#define TARGET_TRIM_IAMGE_PATH          "/TRIM.BIN"
 #define MAX_SECTOR_SIZE                 (4096)
 /*******************************************************************************
  * Prototypes
@@ -90,21 +60,16 @@ extern const target_flash_t flash;
  */
 void delay(uint32_t milliseconds);
 
-/*******************************************************************************
- * Variables
- ******************************************************************************/
 static FATFS g_fileSystem; /* File system object */
 static FIL f_pimage;   /* pflash image file */
-static FIL f_dimage;   /* dflash image file */
+static FIL f_trim_image;   /* dflash image file */
 static FIL f_config;   /* config file */
 static uint8_t ImageBuf[MAX_SECTOR_SIZE];   /* Read buffer, maxed sector size on Kinetis*/
 static AlgorithmParams_t Algorithm;
-static bool IsDFlashImageExist = false;
 static uint32_t FlashOption = 0;
-/*******************************************************************************
- * Code
- ******************************************************************************/
- 
+static uint32_t KE_TRIM = 0;
+uint8_t trim_val = 0x4C;
+    
 void ERROR_TRACE(const char *log)
 {
     printf("system halt!!!\r\n");
@@ -125,7 +90,7 @@ void delay(uint32_t milliseconds)
     {
         for (j = 0; j < 20000U; j++)
         {
-            __asm("NOP");
+            __NOP();
         }
     }
 }
@@ -143,7 +108,7 @@ void SWD_PinInit(void)
     GPIOB->PDDR |= (1<<10);
     
     /* SWCLK */
-    PORTB->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK | PORT_PCR_SRE_MASK;
+    PORTB->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
     GPIOB->PDDR |= (1<<2);
     
     /* SWDIO */
@@ -154,6 +119,7 @@ void SWD_PinInit(void)
     
     TRST(0);
     SWJ_InitDebug();
+
     
     uint32_t id;
     SWJ_ReadDP(DP_IDCODE, &id);
@@ -177,9 +143,165 @@ void SWD_PinDeInit(void)
     GPIOB->PDDR &= ~(1<<3);
 }
 
-/*!
- * @brief Main function
- */
+static uint32_t read_image(const char *path, FIL *f)
+{
+    uint32_t error;
+    
+    error = f_open(f, path, FA_READ);
+    if(error != FR_OK)
+    {
+        printf("cannot find %s!\r\n", path);
+        LED_BLUE_ON();
+        while(1);
+    }
+    else
+    {
+        PRINTF("image find %s, size:%d\r\n", path, f->fsize);
+    }
+}
+
+static uint32_t program_image(FIL *f)
+{
+    uint32_t len, ret, error;
+    UINT br;
+    uint32_t offset;
+    uint32_t start_addr = 0;
+    uint32_t page_size = flash.ram_to_flash_bytes_to_be_written;
+    
+    /* inject flash algorithm */
+    ret = target_flash_init(&flash,  Algorithm.wodg_base, Algorithm.wdog_type, Algorithm.sector_size, Algorithm.pgm);
+    if(ret)
+    {
+        ERROR_TRACE("dowloading flash algorithm failed");
+    }
+    
+    
+    /* erase program flash sector */
+    offset = 0;
+    len = f->fsize;
+    
+    while(offset < (len + Algorithm.sector_size))
+    {
+        printf("erase addr:0x%08X\r\n", offset);
+        ret = target_flash_erase_sector(&flash, offset);
+        if(ret)
+        {
+            ERROR_TRACE("erase flash failed\r\n");
+        }
+        offset += Algorithm.sector_size;
+        LED_GREEN_TOGGLE();
+    }
+    
+    /* download program flash */
+    len = f->fsize;
+    offset = 0;
+    
+    while(offset < len)
+    {
+        //printf("writting pflash addr:0x%08X\r\n", offset);
+        printf(">");
+        
+        error = f_read(f, ImageBuf, flash.ram_to_flash_bytes_to_be_written, &br);
+        if(error != FR_OK)
+        {
+            ERROR_TRACE("read file error");
+        }
+        
+        if(KE_TRIM == 1)
+        {
+            const uint32_t trim_addr = 0x3FF;
+
+            if (((offset + start_addr) <= trim_addr) && ((offset + start_addr) + page_size) > trim_addr)
+            {
+                printf("file image addr:0x%X offset:0x%X, val:0x%X\r\n", trim_addr, offset, ImageBuf[trim_addr - offset]);
+                ImageBuf[trim_addr - offset] = trim_val;
+                ImageBuf[trim_addr - offset - 1] = 0x00;
+                printf("new value:address:0x%X val:0x%X\r\n", trim_addr, ImageBuf[trim_addr - offset]);
+            }
+        }
+        
+        ret = target_flash_program_page(&flash, offset, ImageBuf, br);
+        offset += br;
+        
+        if(ret)
+        {
+            ERROR_TRACE("target_flash_program_page failed\r\n");
+        }
+        LED_GREEN_TOGGLE();
+    }
+}
+
+/* KE02 trim */
+#define CORRECT_TUS     (51.25*4)  /* 40M/1024/2 = 19531.25Hz  = 51.25us */
+#define PBin(n)    BITBAND_REG(PTB->PDIR, n)
+
+void measure_freq(uint8_t *trim_val)
+{
+    int i, ret;
+    uint32_t period = 0;
+    uint8_t trim_value = 0x4C;
+    uint32_t fac_us;
+    
+    fac_us = CLOCK_GetBusClkFreq() / 1000000;
+    static pit_config_t pit_config;
+    pit_config.enableRunInDebug = false;
+    PIT_Init(PIT, &pit_config);
+    PIT_SetTimerPeriod(PIT, kPIT_Chnl_1, CLOCK_GetBusClkFreq());
+    PIT_EnableInterrupts(PIT, kPIT_Chnl_1, kPIT_TimerInterruptEnable);
+    PIT_StartTimer(PIT, kPIT_Chnl_1);
+    
+    while(1)
+    {
+        GPIOB->PDDR |= (1<<2); /* SWD CLK */
+        
+        SWJ_SetTargetState(RESET_RUN_WITH_DEBUG);
+        
+        set_swd_speed(100);
+        ret = SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
+       
+        
+        GPIOB->PDDR &= ~(1<<2); /* SWD CLK */
+        printf("measure frequency...\r\n");
+        
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        period = PIT->CHANNEL[1].CVAL;
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        while(PBin(2) == 1);
+        while(PBin(2) == 0);
+        period = (period - PIT->CHANNEL[1].CVAL) / fac_us;
+        printf("time:%d  ICS->C3:0x%X\r\n", period, trim_value);
+        
+        if(period == CORRECT_TUS)
+        {
+            PORTB->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
+            GPIOB->PDDR |= (1<<2); /* SWD CLK */
+            printf("final trim value(ICS->C3) = 0x%X\r\n", trim_value);
+            *trim_val = trim_value;
+            return;
+        }
+        
+        if(period > CORRECT_TUS)
+        {
+            /* 值越大频率越小 */
+            trim_value--;
+        }
+        else
+        {
+            trim_value++;
+        }
+        
+    }
+}
+
+
 int main(void)
 {
     FRESULT error;
@@ -195,20 +317,7 @@ int main(void)
     LED_GREEN_INIT(1);
     LED_BLUE_INIT(1);
     
-
-    /* output 3Hz wave for disable external WDOG reset signal*/
-    CLOCK_EnableClock(kCLOCK_PortC);
-    PORTC->PCR[10] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
-    GPIOC->PDDR |= (1<<10);
-    pit_config_t pit_config;
-    pit_config.enableRunInDebug = false;
-    PIT_Init(PIT, &pit_config);
-    PIT_SetTimerPeriod(PIT, kPIT_Chnl_0, 1000*1000*10);
-    PIT_EnableInterrupts(PIT, kPIT_Chnl_0, kPIT_TimerInterruptEnable);
-    PIT_StartTimer(PIT, kPIT_Chnl_0);
-    NVIC_EnableIRQ(PIT0_IRQn);
-    
-    PRINTF("FRDM K64 offline programmer.\r\n");
+    PRINTF("CoreClock:%dHz.\r\n", CLOCK_GetCoreSysClkFreq());
     PRINTF("init SD card...\r\n");
     
     delay(100U);
@@ -236,8 +345,6 @@ int main(void)
         printf("%d: %-16s WDOG:%d SEC_SIZE:%d %s\r\n", i, AlgorithmTbl[i].name, AlgorithmTbl[i].wdog_type, AlgorithmTbl[i].sector_size, (AlgorithmTbl[i].pgm == 6)?("PGM4"):("PGM8"));
     }
     
-    printf("init swd...\r\n");
-    /* init swd */
     SWD_PinInit();
     
     /* reading configuraton */
@@ -253,7 +360,8 @@ int main(void)
     {
         f_read(&f_config, ImageBuf, f_config.fsize, &cbr);
         printf("\r\nCONFIGURATION:\r\n%s\r\n", ImageBuf);
-        char *p = strstr((const char*)ImageBuf, "FLASH_OPTION=");
+        char *p = NULL;
+        p = strstr((const char*)ImageBuf, "FLASH_OPTION=");
         if(p)
         {
             FlashOption = strtoul(p+strlen("FLASH_OPTION="), 0, 0);
@@ -262,140 +370,45 @@ int main(void)
         printf("FlashOption:%d\r\n", FlashOption);
         Algorithm = AlgorithmTbl[FlashOption];
         printf("\r\n%s WdogType:%d WdogBaseAddr:0x%08X, SectorSize:%d  FlashCmd:%d\r\n", Algorithm.name, Algorithm.wdog_type, Algorithm.wodg_base, Algorithm.sector_size, Algorithm.pgm);
+        
+        p = strstr((const char*)ImageBuf, "KE_TRIM=");
+        if(p)
+        {
+            KE_TRIM = strtoul(p+strlen("KE_TRIM="), 0, 0);
+        }
+        printf("KE_TRIM:%d\r\n", KE_TRIM);
     }
     
-    /* check and open program flash image */
-    error = f_open(&f_pimage, TARGET_PFLASH_IAMGE_PATH, FA_READ);
-    if(error != FR_OK)
-    {
-        printf("Cannot find %s!\r\n", TARGET_PFLASH_IAMGE_PATH);
-        LED_BLUE_ON();
-        while(1);
-    }
-    else
-    {
-        PRINTF("pflash image find %s, size:%d\r\n", TARGET_PFLASH_IAMGE_PATH, f_pimage.fsize);
-    }
     
-    /* check and open data flash image */
-    error = f_open(&f_dimage, TARGET_DFLASH_IAMGE_PATH, FA_READ);
-    if(error != FR_OK)
-    {
-        printf("Cannot find %s!\r\n", TARGET_DFLASH_IAMGE_PATH);
-    }
-    else
-    {
-        PRINTF("dflash image find %s, size:%d\r\n", TARGET_DFLASH_IAMGE_PATH, f_dimage.fsize);
-        IsDFlashImageExist = true;
-    }
+    read_image(TARGET_PFLASH_IAMGE_PATH, &f_pimage);
+    read_image(TARGET_TRIM_IAMGE_PATH, &f_trim_image);
     
-    delay(500);
+    delay(30);
     
     /* unlock Kinetis */
+    printf("unlock...\r\n");
     target_flash_unlock_sequence();
     
     /* prepare download */
     SWJ_SetTargetState(RESET_PROGRAM);
     
-    /* inject flash algorithm */
-    ret = target_flash_init(&flash,  Algorithm.wodg_base, Algorithm.wdog_type, Algorithm.sector_size, Algorithm.pgm);
-    if(ret)
+    if(KE_TRIM == 1)
     {
-        ERROR_TRACE("dowloading flash algorithm failed");
+        printf("ke trim...\r\n");
+        program_image(&f_trim_image);
+        SWD_Disconnect();
+        measure_freq(&trim_val);
     }
     
-    uint32_t len;
-    UINT br;
-    uint32_t offset;
+    /* prepare download */
+    SWJ_SetTargetState(RESET_PROGRAM);
     
-    /* erase program flash sector */
-    offset = 0;
-    len = f_pimage.fsize;
-    
-    while(offset < (len + Algorithm.sector_size))
-    {
-        printf("erase pflash addr:0x%08X\r\n", offset);
-        ret = target_flash_erase_sector(&flash, offset);
-        if(ret)
-        {
-            ERROR_TRACE("erase PFlash failed\r\n");
-        }
-        offset += Algorithm.sector_size;
-        LED_GREEN_TOGGLE();
-    }
-    
-    /* download program flash */
-    len = f_pimage.fsize;
-    offset = 0;
-    
-    while(offset < len)
-    {
-        printf("writting pflash addr:0x%08X\r\n", offset);
-        
-        error = f_read(&f_pimage, ImageBuf, flash.ram_to_flash_bytes_to_be_written, &br);
-        if(error != FR_OK)
-        {
-            ERROR_TRACE("read file error");
-        }
-        
-        ret = target_flash_program_page(&flash, offset, ImageBuf, br);
-        offset += br;
-        
-        if(ret)
-        {
-            ERROR_TRACE("target_flash_program_page failed\r\n");
-        }
-        LED_GREEN_TOGGLE();
-    }
-    
+    set_swd_speed(1);
+    program_image(&f_pimage);
     f_close(&f_pimage);
-
-    /* process data flash */
-    if(IsDFlashImageExist == true)
-    {
-        /* erase data flash sector */
-        offset = 0;
-        len = f_dimage.fsize;
-        
-        while(offset < (len + Algorithm.sector_size))
-        {
-            printf("erase dflash addr:0x%08X\r\n", offset);
-            ret = target_flash_erase_sector(&flash, offset | 0x10000000 | (1<<23));
-            if(ret)
-            {
-                ERROR_TRACE("erase DFlash failed\r\n");
-            }
-            offset += Algorithm.sector_size;
-            LED_GREEN_TOGGLE();
-        }
     
-        /* download data flash */
-        len = f_dimage.fsize;
-        offset = 0;
     
-        while(offset < len)
-        {
-            printf("writting dflash addr:0x%08X\r\n", offset);
-            
-            error = f_read(&f_dimage, ImageBuf, flash.ram_to_flash_bytes_to_be_written, &br);
-            if(error != FR_OK)
-            {
-                ERROR_TRACE("read file error");
-            }
-            
-            ret = target_flash_program_page(&flash, offset | 0x10000000 | (1<<23), ImageBuf, br);
-            offset += br;
-            
-            if(ret)
-            {
-                ERROR_TRACE("target_flash_program_page failed\r\n");
-            }
-            LED_GREEN_TOGGLE();
-        }
-    
-        f_close(&f_dimage);
-    }
-    
+    set_swd_speed(50);
     /* release core and run target */
     SWJ_WriteAP(0x01000004, 0x00);
     val = 0;
@@ -403,7 +416,6 @@ int main(void)
     SWJ_SetTargetState(RESET_RUN);
     
     SWD_PinDeInit();
-    printf("All operation complete\r\n");
     printf("Press reset pin for next download...\r\n");
     
     while(1)

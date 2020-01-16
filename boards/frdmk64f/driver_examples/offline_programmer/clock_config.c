@@ -113,7 +113,7 @@ const clock_config_t g_defaultClockConfigRun = {
         {
             .pllFllSel = 1U,        /* PLLFLLSEL select PLL. */
             .er32kSrc = 2U,         /* ERCLK32K selection, use RTC. */
-            .clkdiv1 = 0x01140000U, /* SIM_CLKDIV1. */
+            .clkdiv1 = 0x11160000U, /* SIM_CLKDIV1. */
         },
     .oscConfig = {.freq = BOARD_XTAL0_CLK_HZ,
                   .capLoad = 0,
@@ -125,7 +125,7 @@ const clock_config_t g_defaultClockConfigRun = {
                           .erclkDiv = 0U,
 #endif
                       }},
-    .coreClock = 120000000U, /* Core clock frequency */
+    .coreClock = 120000000U/2, /* Core clock frequency */
 };
 
 /*******************************************************************************

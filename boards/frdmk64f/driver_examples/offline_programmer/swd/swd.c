@@ -55,7 +55,7 @@ uint8_t SWD_TransferOnce (uint32_t request, uint32_t *data)
     DDIR(0);   
     for (n = 1; n; n--)
     {     
-        SW_CLOCK_CYCLE();        
+        SW_WRITE_BIT(1);        
     }
    
     /* Acknowledge response */ 
@@ -90,14 +90,14 @@ uint8_t SWD_TransferOnce (uint32_t request, uint32_t *data)
                 /* Turnaround */       
                 for (n = 1; n; n--)
                 { 
-                    SW_CLOCK_CYCLE();    
+                    SW_WRITE_BIT(1);    
                 }         
                 DDIR(1);
             }
             else    /* write data */
             {
                 /* Turnaround */       
-                for (n = 1; n; n--) {    SW_CLOCK_CYCLE(); }
+                for (n = 1; n; n--) {    SW_WRITE_BIT(1); }
            
                 DDIR(1);
                 /* Write data */       
@@ -122,16 +122,16 @@ uint8_t SWD_TransferOnce (uint32_t request, uint32_t *data)
             {   
                 for (n = 32+1; n; n--)
                 {            
-                    SW_CLOCK_CYCLE();  /* Dummy Read RDATA[0:31] + Parity */    
+                    SW_WRITE_BIT(1);  /* Dummy Read RDATA[0:31] + Parity */    
                 }         
             }
             /* Turnaround */         
-            for (n = 1; n; n--) { SW_CLOCK_CYCLE();}      
+            for (n = 1; n; n--) { SW_WRITE_BIT(1);}      
             DDIR(1);  
             if (0 && ((request & DAP_TRANSFER_RnW) == 0))
             {   
                 DOUT(0);      
-                for (n = 32+1; n; n--) {    SW_CLOCK_CYCLE();  /* Dummy Write WDATA[0:31] + Parity */   };           
+                for (n = 32+1; n; n--) {    SW_WRITE_BIT(1);  /* Dummy Write WDATA[0:31] + Parity */   };           
             }           
             DOUT(1);        
             return (ack);  
@@ -142,7 +142,7 @@ uint8_t SWD_TransferOnce (uint32_t request, uint32_t *data)
     /* Protocol error */       
     for (n = 1 + 32 + 1; n; n--)
     {         
-        SW_CLOCK_CYCLE();      /* Back off data phase */   
+        SW_WRITE_BIT(1);      /* Back off data phase */   
     }
     DOUT(1);          
     return (ack); 
@@ -590,12 +590,26 @@ uint8_t SWJ_SetTargetState(TARGET_RESET_STATE state)
             // Enable halt on reset
             SWJ_WriteMem32(DBG_EMCR, VC_CORERESET);
         
+            SWJ_WriteMem32(NVIC_AIRCR, VECTKEY | SYSRESETREQ);
+        
             // Reset again
             TRST(0);
-            DELAY_US(20*1000);
+            DELAY_US(20*100);
             TRST(1);
-        
             break;
+        case RESET_RUN_WITH_DEBUG:
+            TRST(0);
+            DELAY_US(20);
+        
+            SWJ_InitDebug();
+        
+            // Enable debug
+            SWJ_WriteMem32(DBG_HCSR, DBGKEY | C_DEBUGEN);
+        
+            // Reset again
+            TRST(0);
+            DELAY_US(2*100);
+            TRST(1);
         default:
             break;
     }
@@ -729,6 +743,23 @@ uint8_t swd_flash_syscall_exec(const FLASH_SYSCALL *sysCallParam, uint32_t entry
     return 0;
 }
 
+
+#define MDM_CTRL                            (0x01000004) 
+
+int SWD_Disconnect(void)
+{
+    int ret;
+    uint32_t val;
+    
+    /* clear debug reqeust and system reset */
+    SWJ_WriteAP(MDM_CTRL, 0x00);
+    
+    /* clear VC_CORERESET */
+    val = 0;
+    ret = SWJ_WriteMem(DBG_EMCR, (uint8_t*)&val, sizeof(val));
+    SWJ_SetTargetState(RESET_RUN);
+    return ret;
+}
 
 uint8_t SWJ_InitDebug(void)
 {
