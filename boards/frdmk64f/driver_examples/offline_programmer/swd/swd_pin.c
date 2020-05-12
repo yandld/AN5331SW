@@ -64,11 +64,15 @@ void DDIR(uint32_t val)
 
 void DELAY_US(uint32_t us)
 {
-    volatile int i;
-    for(i=0; i<swd_speed; i++)
+    volatile int i,j;
+    for(j=0; j<us; j++)
     {
-        __NOP();
+        for(i=0; i<swd_speed; i++)
+        {
+            __NOP();
+        }
     }
+
 }
 
 void TCK(uint32_t val)

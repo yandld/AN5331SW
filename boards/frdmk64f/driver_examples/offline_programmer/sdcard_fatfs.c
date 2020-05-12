@@ -33,7 +33,7 @@ typedef struct
 
 AlgorithmParams_t AlgorithmTbl[] = 
 {
-    /*                                   WDOG_BASE    WDOG_TYPE     SEC_SIZE  PGM CMD */
+    /*                                WDOG_BASE    WDOG_TYPE     SEC_SIZE  PGM CMD */
     {"xxDN256/512",                 0x40052000u,    WDOG_TYPE_16,    2048,   PGM4},
     {"K60DN512",                    0x40052000u,    WDOG_TYPE_16,    2048,   PGM4},
     {"KL28",                        0x40076000u,    WDOG_TYPE_32,    2048,   PGM4},
@@ -42,7 +42,7 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"KL0/1/26/27",                 0x40047000u,    WDOG_TYPE_COP,   1024,   PGM4},
     {"xxFN1M",                      0x40052000u,    WDOG_TYPE_16,    4096,   PGM8},
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
-    {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"KE06",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
 };
 
 /* buffer size (in byte) for read/write operations */
@@ -122,12 +122,16 @@ void SWD_PinInit(void)
 
     
     uint32_t id;
+    
+    id = 0;
     SWJ_ReadDP(DP_IDCODE, &id);
     printf("DP-IDR:0x%X\r\n", id);
     
+    id = 0;
     SWJ_ReadAP(0x000000FC, &id);
     printf("AHB_AP_IDR:0x%X\r\n", id);
 
+    id = 0;
     SWJ_ReadAP(0x010000FC, &id);
     printf("MDM-AP ID:0x%X\r\n", id);
 }
@@ -160,6 +164,8 @@ static uint32_t read_image(const char *path, FIL *f)
     }
 }
 
+#define RT_ALIGN_DOWN(size, align)      ((size) & ~((align) - 1))
+
 static uint32_t program_image(FIL *f)
 {
     uint32_t len, ret, error;
@@ -180,16 +186,24 @@ static uint32_t program_image(FIL *f)
     offset = 0;
     len = f->fsize;
     
-    while(offset < (len + Algorithm.sector_size))
+    while(offset <= RT_ALIGN_DOWN((len + Algorithm.sector_size), Algorithm.sector_size))
     {
-        printf("erase addr:0x%08X\r\n", offset);
-        ret = target_flash_erase_sector(&flash, offset);
-        if(ret)
+        if(offset != 128*1024)
         {
-            ERROR_TRACE("erase flash failed\r\n");
+            printf("erase addr:0x%08X\r\n", offset);
+            ret = target_flash_erase_sector(&flash, offset);
+            if(ret)
+            {
+                ERROR_TRACE("erase flash failed\r\n");
+            }
+            offset += Algorithm.sector_size;
+            LED_GREEN_TOGGLE();
         }
-        offset += Algorithm.sector_size;
-        LED_GREEN_TOGGLE();
+        
+        if(offset == 128*1024)
+        {
+            break;
+        }
     }
     
     /* download program flash */
@@ -237,7 +251,6 @@ static uint32_t program_image(FIL *f)
 
 void measure_freq(uint8_t *trim_val)
 {
-    int i, ret;
     uint32_t period = 0;
     uint8_t trim_value = 0x4C;
     uint32_t fac_us;
@@ -257,7 +270,7 @@ void measure_freq(uint8_t *trim_val)
         SWJ_SetTargetState(RESET_RUN_WITH_DEBUG);
         
         set_swd_speed(100);
-        ret = SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
+        SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
        
         
         GPIOB->PDDR &= ~(1<<2); /* SWD CLK */
@@ -306,7 +319,6 @@ int main(void)
 {
     FRESULT error;
     uint32_t val, i;
-    int ret;
     const TCHAR driverNumberBuffer[3U] = {SDDISK + '0', ':', '/'};
 
     BOARD_InitPins();
@@ -392,13 +404,13 @@ int main(void)
     /* prepare download */
     SWJ_SetTargetState(RESET_PROGRAM);
     
-    if(KE_TRIM == 1)
-    {
-        printf("ke trim...\r\n");
-        program_image(&f_trim_image);
-        SWD_Disconnect();
-        measure_freq(&trim_val);
-    }
+//    if(KE_TRIM == 1)
+//    {
+//        printf("ke trim...\r\n");
+//        program_image(&f_trim_image);
+//        SWD_Disconnect();
+//        measure_freq(&trim_val);
+//    }
     
     /* prepare download */
     SWJ_SetTargetState(RESET_PROGRAM);
