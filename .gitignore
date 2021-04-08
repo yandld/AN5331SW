@@ -1,0 +1,76 @@
+# Mac files
+.DS_Store
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+tmp/
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Python
+*.py[cod]
+
+# Eclipse Project Files
+.cproject
+.project
+.pydevproject
+
+# uvision Project Files
+*.uvproj
+*.uvopt
+
+# generated project files
+projectfiles
+
+*.plg
+*.map
+*.lst
+*.lnp
+*.htm
+*.dep
+*.d
+*.crf
+*.bak
+
+*.axf
+*.S19
+*.bin
+*.hex
+*.dep
+*.FLM
+*.log
+
+# JLink files
+JLink*.*
+
+# Output directories
+Output
+Lst
+Obj
+
+# cscope
+cscope.*
+
+# ctags
+tags
+
+# Doxygen tags and html output
+*.tag
+*.html
+debug.txt
+docs
+
+# PyCharm project files
+.idea
+
+# virtual environment
+venv/

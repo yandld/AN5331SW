@@ -43,12 +43,15 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"xxFN1M",                      0x40052000u,    WDOG_TYPE_16,    4096,   PGM8},
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
     {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
 };
 
 /* buffer size (in byte) for read/write operations */
-extern const target_flash_t flash;
+extern  target_flash_t flash_main;
+extern  target_flash_t flash_eep;
 #define TARGET_PFLASH_IAMGE_PATH        "/PIMAGE.BIN"
 #define TARGET_TRIM_IAMGE_PATH          "/TRIM.BIN"
+#define TARGET_EEP_IAMGE_PATH          "/KE02_EEP.BIN"
 #define MAX_SECTOR_SIZE                 (4096)
 /*******************************************************************************
  * Prototypes
@@ -62,12 +65,14 @@ void delay(uint32_t milliseconds);
 
 static FATFS g_fileSystem; /* File system object */
 static FIL f_pimage;   /* pflash image file */
-static FIL f_trim_image;   /* dflash image file */
+static FIL f_trim_image;
+static FIL f_ke_eep_image;
 static FIL f_config;   /* config file */
 static uint8_t ImageBuf[MAX_SECTOR_SIZE];   /* Read buffer, maxed sector size on Kinetis*/
 static AlgorithmParams_t Algorithm;
 static uint32_t FlashOption = 0;
 static uint32_t KE_TRIM = 0;
+static uint32_t KE_EEP = 0;
 uint8_t trim_val = 0x4C;
     
 void ERROR_TRACE(const char *log)
@@ -160,16 +165,15 @@ static uint32_t read_image(const char *path, FIL *f)
     }
 }
 
-static uint32_t program_image(FIL *f)
+static uint32_t program_image(FIL *f, target_flash_t *flash, uint32_t start_addr, uint32_t sec_size)
 {
     uint32_t len, ret, error;
     UINT br;
     uint32_t offset;
-    uint32_t start_addr = 0;
-    uint32_t page_size = flash.ram_to_flash_bytes_to_be_written;
+    uint32_t page_size = flash->ram_to_flash_bytes_to_be_written;
     
     /* inject flash algorithm */
-    ret = target_flash_init(&flash,  Algorithm.wodg_base, Algorithm.wdog_type, Algorithm.sector_size, Algorithm.pgm);
+    ret = target_flash_init(flash,  Algorithm.wodg_base, Algorithm.wdog_type, sec_size, Algorithm.pgm);
     if(ret)
     {
         ERROR_TRACE("dowloading flash algorithm failed");
@@ -180,15 +184,15 @@ static uint32_t program_image(FIL *f)
     offset = 0;
     len = f->fsize;
     
-    while(offset < (len + Algorithm.sector_size))
+    while(offset < len)
     {
-        printf("erase addr:0x%08X\r\n", offset);
-        ret = target_flash_erase_sector(&flash, offset);
+        printf("erase addr:0x%08X\r\n", offset + start_addr);
+        ret = target_flash_erase_sector(flash, offset + start_addr);
         if(ret)
         {
             ERROR_TRACE("erase flash failed\r\n");
         }
-        offset += Algorithm.sector_size;
+        offset += sec_size;
         LED_GREEN_TOGGLE();
     }
     
@@ -201,7 +205,7 @@ static uint32_t program_image(FIL *f)
         //printf("writting pflash addr:0x%08X\r\n", offset);
         printf(">");
         
-        error = f_read(f, ImageBuf, flash.ram_to_flash_bytes_to_be_written, &br);
+        error = f_read(f, ImageBuf, flash->ram_to_flash_bytes_to_be_written, &br);
         if(error != FR_OK)
         {
             ERROR_TRACE("read file error");
@@ -220,7 +224,7 @@ static uint32_t program_image(FIL *f)
             }
         }
         
-        ret = target_flash_program_page(&flash, offset, ImageBuf, br);
+        ret = target_flash_program_page(flash, offset + start_addr, ImageBuf, br);
         offset += br;
         
         if(ret)
@@ -237,7 +241,6 @@ static uint32_t program_image(FIL *f)
 
 void measure_freq(uint8_t *trim_val)
 {
-    int i, ret;
     uint32_t period = 0;
     uint8_t trim_value = 0x4C;
     uint32_t fac_us;
@@ -257,7 +260,7 @@ void measure_freq(uint8_t *trim_val)
         SWJ_SetTargetState(RESET_RUN_WITH_DEBUG);
         
         set_swd_speed(100);
-        ret = SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
+        SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
        
         
         GPIOB->PDDR &= ~(1<<2); /* SWD CLK */
@@ -377,11 +380,27 @@ int main(void)
             KE_TRIM = strtoul(p+strlen("KE_TRIM="), 0, 0);
         }
         printf("KE_TRIM:%d\r\n", KE_TRIM);
+        
+        p = strstr((const char*)ImageBuf, "KE_EEP=");
+        if(p)
+        {
+            KE_EEP = strtoul(p+strlen("KE_EEP="), 0, 0);
+        }
+        printf("KE_EEP:%d\r\n", KE_EEP);
     }
     
     
     read_image(TARGET_PFLASH_IAMGE_PATH, &f_pimage);
-    read_image(TARGET_TRIM_IAMGE_PATH, &f_trim_image);
+    
+    if(KE_TRIM == 1)
+    {
+        read_image(TARGET_TRIM_IAMGE_PATH, &f_trim_image);
+    }
+    
+    if(KE_EEP == 1)
+    {
+        read_image(TARGET_EEP_IAMGE_PATH, &f_ke_eep_image);
+    }
     
     delay(30);
     
@@ -395,19 +414,28 @@ int main(void)
     if(KE_TRIM == 1)
     {
         printf("ke trim...\r\n");
-        program_image(&f_trim_image);
+        program_image(&f_trim_image, &flash_main, 0x00000000, Algorithm.sector_size);
         SWD_Disconnect();
         measure_freq(&trim_val);
     }
     
-    /* prepare download */
+    /* program main image */
     SWJ_SetTargetState(RESET_PROGRAM);
-    
     set_swd_speed(1);
-    program_image(&f_pimage);
+    
+    program_image(&f_pimage, &flash_main, 0x00000000, Algorithm.sector_size);
     f_close(&f_pimage);
     
+    /* program EEP */
+    if(KE_EEP == 1)
+    {
+        SWJ_SetTargetState(RESET_PROGRAM);
+        program_image(&f_ke_eep_image, &flash_eep, 0x10000000, 2);
+        f_close(&f_pimage);
+    }
+
     
+
     set_swd_speed(50);
     /* release core and run target */
     SWJ_WriteAP(0x01000004, 0x00);

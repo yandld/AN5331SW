@@ -27,7 +27,7 @@ static const uint32_t KIENTIS_FLM[] = {
     0x40052000, 0x000028d9, 0x40020000, 0xf0003000, 0x00000000
 };
 
- const target_flash_t flash = {
+  target_flash_t flash_main = {
     0x20000021, // Init
     0x20000051, // UnInit
     0x20000055, // EraseChip
