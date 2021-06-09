@@ -20,33 +20,33 @@ uint8_t target_flash_unlock_sequence(void)
     uint32_t val;
     
     /* verify the result */
-    SWJ_ReadAP(MDM_IDR, &val);
+    swd_read_ap(MDM_IDR, &val);
     if ((val != KINETIS_KK_MCU_ID) && (val != KINETIS_KL_MCU_ID))
     {
         printf("not Kinetis!\r\n");
         return CH_ERR;
     }
    
-    SWJ_ReadAP(MDM_STATUS, &val);
+    swd_read_ap(MDM_STATUS, &val);
     
     /* flash in secured mode */
  //   if (val & (1 << 2))
     {
         printf("chip is secrued!\r\n");
         /* hold the device in reset */
-        TRST(0);
-        if(SWJ_WriteAP(MDM_CTRL, (1<<0)))
+        TRST = 0;
+        if(swd_write_ap(MDM_CTRL, (1<<0)))
         {
             printf("launch mess erase failed\r\n");
             /* launch mess erase failed */
             return CH_ERR;
         }
         
-        TRST(1);
+        TRST = 1;
         while (1)
         {
             /* wait until mass erase is started */
-            if(SWJ_ReadAP(MDM_STATUS, &val))
+            if(swd_read_ap(MDM_STATUS, &val))
             {
                 /* read MDM_STATUS failed */
                 return CH_ERR;
@@ -57,7 +57,7 @@ uint8_t target_flash_unlock_sequence(void)
         while (1)
         {
             /* keep reading until procedure is complete */
-            if(SWJ_ReadAP(MDM_CTRL, &val))
+            if(swd_read_ap(MDM_CTRL, &val))
             {
                 printf("failed\r\n");
                  return CH_ERR;
@@ -67,7 +67,7 @@ uint8_t target_flash_unlock_sequence(void)
         }
         
         /* reset MDM-CTRL */
-        SWJ_WriteAP(MDM_CTRL, 0);
+        swd_write_ap(MDM_CTRL, 0);
     }
 //    else
 //    {
@@ -75,7 +75,7 @@ uint8_t target_flash_unlock_sequence(void)
 //    }
     
     /* halt MCU otherwise it loops in hard fault - WDOG reset cycle */
-    TRST(0);
+    TRST = 0;
     return CH_OK;
 }
 
@@ -85,7 +85,7 @@ uint8_t target_flash_init(const target_flash_t* flash, uint32_t wdog_base_addr, 
     uint8_t ret;
     
     /* Download flash programming algorithm to target and initialise. */
-    ret = SWJ_WriteMem(flash->algo_start, (uint8_t *)flash->image, flash->algo_size);
+    ret = swd_write_memory(flash->algo_start, (uint8_t *)flash->image, flash->algo_size);
     if(ret)
     {
         /* inject flash algorithm failed */
@@ -168,7 +168,7 @@ uint8_t target_flash_program_page(const target_flash_t* flash, uint32_t addr, ui
     }
 
     // Program a page in target flash.
-    if(SWJ_WriteMem(flash->program_buffer, buf, size))
+    if(swd_write_memory(flash->program_buffer, buf, size))
     {
         /* write memory failed */
         return CH_ERR;

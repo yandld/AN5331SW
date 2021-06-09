@@ -43,7 +43,7 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"xxFN1M",                      0x40052000u,    WDOG_TYPE_16,    4096,   PGM8},
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
     {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
-    {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"LPC802",                        0,    0,  1024,    PGM8},
 };
 
 /* buffer size (in byte) for read/write operations */
@@ -52,7 +52,7 @@ extern  target_flash_t flash_eep;
 #define TARGET_PFLASH_IAMGE_PATH        "/PIMAGE.BIN"
 #define TARGET_TRIM_IAMGE_PATH          "/TRIM.BIN"
 #define TARGET_EEP_IAMGE_PATH          "/KE02_EEP.BIN"
-#define MAX_SECTOR_SIZE                 (4096)
+#define MAX_SECTOR_SIZE                 (1024)
 /*******************************************************************************
  * Prototypes
  ******************************************************************************/
@@ -109,7 +109,7 @@ void SWD_PinInit(void)
     CLOCK_EnableClock(kCLOCK_PortE);
     
     /* TRST */
-    PORTB->PCR[10] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
+    PORTB->PCR[10] = PORT_PCR_MUX(1);
     GPIOB->PDDR |= (1<<10);
     
     /* SWCLK */
@@ -122,19 +122,19 @@ void SWD_PinInit(void)
     
     SW_PinInit();
     
-    TRST(0);
-    SWJ_InitDebug();
+    TRST = 1;
+    swd_init_debug();
 
     
     uint32_t id;
-    SWJ_ReadDP(DP_IDCODE, &id);
+    swd_read_dp(DP_IDCODE, &id);
     printf("DP-IDR:0x%X\r\n", id);
     
-    SWJ_ReadAP(0x000000FC, &id);
+    swd_read_ap(0x000000FC, &id);
     printf("AHB_AP_IDR:0x%X\r\n", id);
 
-    SWJ_ReadAP(0x010000FC, &id);
-    printf("MDM-AP ID:0x%X\r\n", id);
+//    swd_read_ap(0x010000FC, &id);
+//    printf("MDM-AP ID:0x%X\r\n", id);
 }
 
 void SWD_PinDeInit(void)
@@ -167,18 +167,20 @@ static uint32_t read_image(const char *path, FIL *f)
 
 static uint32_t program_image(FIL *f, target_flash_t *flash, uint32_t start_addr, uint32_t sec_size)
 {
+    int i;
     uint32_t len, ret, error;
     UINT br;
     uint32_t offset;
     uint32_t page_size = flash->ram_to_flash_bytes_to_be_written;
     
     /* inject flash algorithm */
-    ret = target_flash_init(flash,  Algorithm.wodg_base, Algorithm.wdog_type, sec_size, Algorithm.pgm);
+    ret = target_flash_init(flash, 0, 0, 0, 0);
     if(ret)
     {
         ERROR_TRACE("dowloading flash algorithm failed");
     }
     
+    delay(1);
     
     /* erase program flash sector */
     offset = 0;
@@ -196,36 +198,27 @@ static uint32_t program_image(FIL *f, target_flash_t *flash, uint32_t start_addr
         LED_GREEN_TOGGLE();
     }
     
+    delay(1);
+    
     /* download program flash */
     len = f->fsize;
     offset = 0;
     
+    uint8_t succ = 0;
+    
     while(offset < len)
     {
-        //printf("writting pflash addr:0x%08X\r\n", offset);
-        printf(">");
-        
         error = f_read(f, ImageBuf, flash->ram_to_flash_bytes_to_be_written, &br);
         if(error != FR_OK)
         {
             ERROR_TRACE("read file error");
         }
         
-        if(KE_TRIM == 1)
-        {
-            const uint32_t trim_addr = 0x3FF;
-
-            if (((offset + start_addr) <= trim_addr) && ((offset + start_addr) + page_size) > trim_addr)
-            {
-                printf("file image addr:0x%X offset:0x%X, val:0x%X\r\n", trim_addr, offset, ImageBuf[trim_addr - offset]);
-                ImageBuf[trim_addr - offset] = trim_val;
-                ImageBuf[trim_addr - offset - 1] = 0x00;
-                printf("new value:address:0x%X val:0x%X\r\n", trim_addr, ImageBuf[trim_addr - offset]);
-            }
-        }
+        printf("programing addr:0x%08X, size:%d\r\n", offset + start_addr, br);
         
         ret = target_flash_program_page(flash, offset + start_addr, ImageBuf, br);
         offset += br;
+        
         
         if(ret)
         {
@@ -233,76 +226,55 @@ static uint32_t program_image(FIL *f, target_flash_t *flash, uint32_t start_addr
         }
         LED_GREEN_TOGGLE();
     }
+    
+//    /* varify */
+//    TRST = 0;
+//    DELAY_US(20*100);
+//    TRST = 1;
+//    DELAY_US(20*100);
+//    
+//    set_swd_speed(20);
+//    swd_set_target_state(RESET_PROGRAM);
+
+//    /* inject flash algorithm */
+//    ret = target_flash_init(flash, 0, 0, 0, 0);
+//    if(ret)
+//    {
+//        ERROR_TRACE("dowloading flash algorithm failed");
+//    }
+    
+//    f_lseek(f, 0);
+//    offset = 0;
+//    while(offset < len)
+//    {
+//        error = f_read(f, ImageBuf, flash->ram_to_flash_bytes_to_be_written, &br);
+//        if(error != FR_OK)
+//        {
+//            ERROR_TRACE("read file error");
+//        }
+//        
+//        static uint8_t buf[64];
+//        memset(buf, 0xFF, 64);
+//        swd_read_memory(offset + start_addr, buf, br);
+
+//        for(i=0; i<br; i++)
+//        {
+//            if(buf[i] != ImageBuf[i])
+//            {
+//                ERROR_TRACE("varify error\r\n");
+//            }
+//        }
+
+//        offset += br;
+//        LED_GREEN_TOGGLE();
+//    }
+    
 }
 
-/* KE02 trim */
-#define CORRECT_TUS     (51.25*4)  /* 40M/1024/2 = 19531.25Hz  = 51.25us */
-#define PBin(n)    BITBAND_REG(PTB->PDIR, n)
 
-void measure_freq(uint8_t *trim_val)
-{
-    uint32_t period = 0;
-    uint8_t trim_value = 0x4C;
-    uint32_t fac_us;
-    
-    fac_us = CLOCK_GetBusClkFreq() / 1000000;
-    static pit_config_t pit_config;
-    pit_config.enableRunInDebug = false;
-    PIT_Init(PIT, &pit_config);
-    PIT_SetTimerPeriod(PIT, kPIT_Chnl_1, CLOCK_GetBusClkFreq());
-    PIT_EnableInterrupts(PIT, kPIT_Chnl_1, kPIT_TimerInterruptEnable);
-    PIT_StartTimer(PIT, kPIT_Chnl_1);
-    
-    while(1)
-    {
-        GPIOB->PDDR |= (1<<2); /* SWD CLK */
-        
-        SWJ_SetTargetState(RESET_RUN_WITH_DEBUG);
-        
-        set_swd_speed(100);
-        SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
-       
-        
-        GPIOB->PDDR &= ~(1<<2); /* SWD CLK */
-        printf("measure frequency...\r\n");
-        
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        period = PIT->CHANNEL[1].CVAL;
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        period = (period - PIT->CHANNEL[1].CVAL) / fac_us;
-        printf("time:%d  ICS->C3:0x%X\r\n", period, trim_value);
-        
-        if(period == CORRECT_TUS)
-        {
-            PORTB->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
-            GPIOB->PDDR |= (1<<2); /* SWD CLK */
-            printf("final trim value(ICS->C3) = 0x%X\r\n", trim_value);
-            *trim_val = trim_value;
-            return;
-        }
-        
-        if(period > CORRECT_TUS)
-        {
-            /* 值越大频率越小 */
-            trim_value--;
-        }
-        else
-        {
-            trim_value++;
-        }
-        
-    }
-}
+
+
+
 
 
 int main(void)
@@ -323,7 +295,7 @@ int main(void)
     PRINTF("CoreClock:%dHz.\r\n", CLOCK_GetCoreSysClkFreq());
     PRINTF("init SD card...\r\n");
     
-    delay(100U);
+    delay(1);
 
     if (f_mount(&g_fileSystem, driverNumberBuffer, 0U))
     {
@@ -402,46 +374,30 @@ int main(void)
         read_image(TARGET_EEP_IAMGE_PATH, &f_ke_eep_image);
     }
     
-    delay(30);
+    delay(1);
     
-    /* unlock Kinetis */
-    printf("unlock...\r\n");
-    target_flash_unlock_sequence();
+//    /* unlock Kinetis */
+//    printf("unlock...\r\n");
+//    target_flash_unlock_sequence();
     
     /* prepare download */
-    SWJ_SetTargetState(RESET_PROGRAM);
-    
-    if(KE_TRIM == 1)
-    {
-        printf("ke trim...\r\n");
-        program_image(&f_trim_image, &flash_main, 0x00000000, Algorithm.sector_size);
-        SWD_Disconnect();
-        measure_freq(&trim_val);
-    }
-    
-    /* program main image */
-    SWJ_SetTargetState(RESET_PROGRAM);
-    set_swd_speed(1);
+    set_swd_speed(50);
+    swd_set_target_state(RESET_PROGRAM);
+
+////    /* program main image */
+//    swd_set_target_state(RESET_PROGRAM);
+    set_swd_speed(2);
     
     program_image(&f_pimage, &flash_main, 0x00000000, Algorithm.sector_size);
     f_close(&f_pimage);
     
-    /* program EEP */
-    if(KE_EEP == 1)
-    {
-        SWJ_SetTargetState(RESET_PROGRAM);
-        program_image(&f_ke_eep_image, &flash_eep, 0x10000000, 2);
-        f_close(&f_pimage);
-    }
-
-    
 
     set_swd_speed(50);
     /* release core and run target */
-    SWJ_WriteAP(0x01000004, 0x00);
+    swd_write_ap(0x01000004, 0x00);
     val = 0;
-    SWJ_WriteMem(DBG_EMCR, (uint8_t*)&val, sizeof(val));
-    SWJ_SetTargetState(RESET_RUN);
+    swd_write_memory(DBG_EMCR, (uint8_t*)&val, sizeof(val));
+    swd_set_target_state(RESET_RUN);
     
     SWD_PinDeInit();
     printf("Press reset pin for next download...\r\n");

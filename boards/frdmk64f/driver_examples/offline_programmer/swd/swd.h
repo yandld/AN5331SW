@@ -78,15 +78,15 @@ typedef struct {
 
 
 //!< API
-uint8_t SWJ_ReadDP(uint8_t adr, uint32_t *val);
-uint8_t SWJ_WriteDP(uint8_t adr, uint32_t val);
-uint8_t SWJ_ReadAP(uint32_t adr, uint32_t *val);
-uint8_t SWJ_WriteAP(uint32_t adr, uint32_t val);
-uint8_t SWJ_InitDebug(void);
+uint8_t swd_read_dp(uint8_t adr, uint32_t *val);
+uint8_t swd_write_dp(uint8_t adr, uint32_t val);
+uint8_t swd_read_ap(uint32_t adr, uint32_t *val);
+uint8_t swd_write_ap(uint32_t adr, uint32_t val);
+uint8_t swd_init_debug(void);
 int SWD_Disconnect(void);
-uint8_t SWJ_ReadMem(uint32_t addr, uint8_t *buf, uint32_t len);
-uint8_t SWJ_WriteMem(uint32_t addr, uint8_t *buf, uint32_t len);
-uint8_t SWJ_SetTargetState(TARGET_RESET_STATE state);
+uint8_t swd_read_memory(uint32_t addr, uint8_t *buf, uint32_t len);
+uint8_t swd_write_memory(uint32_t addr, uint8_t *buf, uint32_t len);
+uint8_t swd_set_target_state(TARGET_RESET_STATE state);
 uint8_t swd_flash_syscall_exec(const FLASH_SYSCALL *sysCallParam, uint32_t entry, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4);
 
 #endif
