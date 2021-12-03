@@ -1,7 +1,7 @@
 #include "swd.h"
 
 #ifndef SWD_DEBUG
-#define SWD_DEBUG		0
+#define SWD_DEBUG		1
 #endif
 
 #if (SWD_DEBUG == 1)
@@ -563,8 +563,24 @@ static uint8_t SWJ_WaitUntilHalted(void)
     return DAP_TRANSFER_ERROR;
 }
 
+
+
+
+/* Debug mailbox AP registers */
+#define DEBUGMB_CSW  0x02000000
+#define DEBUGMB_REQ  0x02000004
+#define DEBUGMB_RET  0x02000008
+#define DEBUGMB_ID   0x020000FC
+
+#define DWT_COMP0               (0xE0001020)
+#define DWT_FUNCTION0           (0xE0001028)
+#define DWT_FUNCTION_MATCH      (0x4 << 0)
+#define DWT_FUNCTION_ACTION     (0x1 << 4)
+#define DWT_FUNCTION_DATAVSIZE  (0x2 << 10)
+
 uint8_t SWJ_SetTargetState(TARGET_RESET_STATE state)
 {
+    uint32_t val, i, id, err;
     switch (state)
     {
         case RESET_HOLD:
@@ -579,23 +595,41 @@ uint8_t SWJ_SetTargetState(TARGET_RESET_STATE state)
         case RESET_PROGRAM:
             TRST(0);
             DELAY_US(20);
-         //   TRST(1);
-         //   DelayMs(20);
+            TRST(1);
+            DELAY_US(200*100);
 
             SWJ_InitDebug();
         
-            // Enable debug
-            SWJ_WriteMem32(DBG_HCSR, DBGKEY | C_DEBUGEN);
+        err = SWJ_WriteMem32(DBG_HCSR, DBGKEY | C_DEBUGEN);
+        DELAY_US(200*100);
 
-            // Enable halt on reset
-            SWJ_WriteMem32(DBG_EMCR, VC_CORERESET);
+        err = SWJ_WriteAP(DEBUGMB_CSW, 0x21);
+        DELAY_US(200*100);
+        err = SWJ_ReadAP(DEBUGMB_CSW, &val);
+        DELAY_US(200*100);
+            
+        err = SWJ_WriteAP(DEBUGMB_REQ, 0x07);
+        err = SWJ_ReadAP(DEBUGMB_CSW, &val);
+        DELAY_US(200*100);
+
+
+        err = SWJ_ReadAP(DEBUGMB_ID, &id);
+        printf("DEBUGMB_ID: %d  0x%X\r\n", err, id);
         
-            SWJ_WriteMem32(NVIC_AIRCR, VECTKEY | SYSRESETREQ);
-        
-            // Reset again
-            TRST(0);
-            DELAY_US(20*100);
-            TRST(1);
+        SWJ_WriteMem32(0xE0002008, 0x215|1);            // Program FPB Comparator 0 with reset handler address
+        SWJ_WriteMem32(0xE0002000, 0x00000003);         // Enable FPB
+
+
+        // TRST(1);
+        // Enable halt on reset
+        SWJ_WriteMem32(DBG_EMCR, VC_CORERESET);
+        DELAY_US(200*100);
+            
+        /* RESET using mailbox */ 
+        err = SWJ_WriteAP(DEBUGMB_CSW, 0x20);
+        DELAY_US(200*100);
+          //SWJ_WriteMem32(NVIC_AIRCR, VECTKEY | SYSRESETREQ);
+
             break;
         case RESET_RUN_WITH_DEBUG:
             TRST(0);

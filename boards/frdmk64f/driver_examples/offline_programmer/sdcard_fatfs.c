@@ -43,6 +43,8 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"xxFN1M",                      0x40052000u,    WDOG_TYPE_16,    4096,   PGM8},
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
     {"KE06",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"LPC55S69",                    0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"LPC55S69",                    0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
 };
 
 /* buffer size (in byte) for read/write operations */
@@ -117,9 +119,8 @@ void SWD_PinInit(void)
     
     SW_PinInit();
     
-    TRST(0);
+    TRST(1);
     SWJ_InitDebug();
-
     
     uint32_t id;
     
@@ -131,9 +132,6 @@ void SWD_PinInit(void)
     SWJ_ReadAP(0x000000FC, &id);
     printf("AHB_AP_IDR:0x%X\r\n", id);
 
-    id = 0;
-    SWJ_ReadAP(0x010000FC, &id);
-    printf("MDM-AP ID:0x%X\r\n", id);
 }
 
 void SWD_PinDeInit(void)
@@ -175,10 +173,10 @@ static uint32_t program_image(FIL *f)
     uint32_t page_size = flash.ram_to_flash_bytes_to_be_written;
     
     /* inject flash algorithm */
-    ret = target_flash_init(&flash,  Algorithm.wodg_base, Algorithm.wdog_type, Algorithm.sector_size, Algorithm.pgm);
+    ret = target_flash_init(&flash,  0, 0, 0, 0);
     if(ret)
     {
-        ERROR_TRACE("dowloading flash algorithm failed");
+        ERROR_TRACE("download flash algorithm failed");
     }
     
     
@@ -245,74 +243,6 @@ static uint32_t program_image(FIL *f)
     }
 }
 
-/* KE02 trim */
-#define CORRECT_TUS     (51.25*4)  /* 40M/1024/2 = 19531.25Hz  = 51.25us */
-#define PBin(n)    BITBAND_REG(PTB->PDIR, n)
-
-void measure_freq(uint8_t *trim_val)
-{
-    uint32_t period = 0;
-    uint8_t trim_value = 0x4C;
-    uint32_t fac_us;
-    
-    fac_us = CLOCK_GetBusClkFreq() / 1000000;
-    static pit_config_t pit_config;
-    pit_config.enableRunInDebug = false;
-    PIT_Init(PIT, &pit_config);
-    PIT_SetTimerPeriod(PIT, kPIT_Chnl_1, CLOCK_GetBusClkFreq());
-    PIT_EnableInterrupts(PIT, kPIT_Chnl_1, kPIT_TimerInterruptEnable);
-    PIT_StartTimer(PIT, kPIT_Chnl_1);
-    
-    while(1)
-    {
-        GPIOB->PDDR |= (1<<2); /* SWD CLK */
-        
-        SWJ_SetTargetState(RESET_RUN_WITH_DEBUG);
-        
-        set_swd_speed(100);
-        SWJ_WriteMem(0x40064002, (uint8_t*)&trim_value, 1);
-       
-        
-        GPIOB->PDDR &= ~(1<<2); /* SWD CLK */
-        printf("measure frequency...\r\n");
-        
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        period = PIT->CHANNEL[1].CVAL;
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        while(PBin(2) == 1);
-        while(PBin(2) == 0);
-        period = (period - PIT->CHANNEL[1].CVAL) / fac_us;
-        printf("time:%d  ICS->C3:0x%X\r\n", period, trim_value);
-        
-        if(period == CORRECT_TUS)
-        {
-            PORTB->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
-            GPIOB->PDDR |= (1<<2); /* SWD CLK */
-            printf("final trim value(ICS->C3) = 0x%X\r\n", trim_value);
-            *trim_val = trim_value;
-            return;
-        }
-        
-        if(period > CORRECT_TUS)
-        {
-            /* 值越大频率越小 */
-            trim_value--;
-        }
-        else
-        {
-            trim_value++;
-        }
-        
-    }
-}
 
 
 int main(void)
@@ -393,29 +323,18 @@ int main(void)
     
     
     read_image(TARGET_PFLASH_IAMGE_PATH, &f_pimage);
-    read_image(TARGET_TRIM_IAMGE_PATH, &f_trim_image);
+  //  read_image(TARGET_TRIM_IAMGE_PATH, &f_trim_image);
     
-    delay(30);
-    
-    /* unlock Kinetis */
-    printf("unlock...\r\n");
-    target_flash_unlock_sequence();
-    
+
+    set_swd_speed(2);
     /* prepare download */
     SWJ_SetTargetState(RESET_PROGRAM);
     
-//    if(KE_TRIM == 1)
-//    {
-//        printf("ke trim...\r\n");
-//        program_image(&f_trim_image);
-//        SWD_Disconnect();
-//        measure_freq(&trim_val);
-//    }
+
     
-    /* prepare download */
-    SWJ_SetTargetState(RESET_PROGRAM);
+
     
-    set_swd_speed(1);
+   
     program_image(&f_pimage);
     f_close(&f_pimage);
     

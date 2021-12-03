@@ -88,6 +88,7 @@ uint8_t target_flash_init(const target_flash_t* flash, uint32_t wdog_base_addr, 
     ret = SWJ_WriteMem(flash->algo_start, (uint8_t *)flash->image, flash->algo_size);
     if(ret)
     {
+        printf("write target mem failed\r\n");
         /* inject flash algorithm failed */
         return CH_ERR;
     }
