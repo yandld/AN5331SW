@@ -53,14 +53,11 @@ extern  target_flash_t flash_eep;
 #define TARGET_TRIM_IAMGE_PATH          "/TRIM.BIN"
 #define TARGET_EEP_IAMGE_PATH          "/KE02_EEP.BIN"
 #define MAX_SECTOR_SIZE                 (4096)
-/*******************************************************************************
- * Prototypes
- ******************************************************************************/
-/*!
- * @brief Delay some time.
- *
- * @param milliseconds Time united in milliseconds.
- */
+
+
+#define CUSTOM_GPIO_OK                  (11)
+#define CUSTOM_GPIO_ERR                 (10)
+
 void delay(uint32_t milliseconds);
 
 static FATFS g_fileSystem; /* File system object */
@@ -82,6 +79,7 @@ void ERROR_TRACE(const char *log)
     LED_GREEN_OFF();
     LED_BLUE_OFF();
     LED_RED_ON();
+    PCout(CUSTOM_GPIO_ERR) = 1;
     __disable_irq();
     while(1);
 }
@@ -102,11 +100,7 @@ void delay(uint32_t milliseconds)
 
 void SWD_PinInit(void)
 {
-    CLOCK_EnableClock(kCLOCK_PortA);
-    CLOCK_EnableClock(kCLOCK_PortB);
-    CLOCK_EnableClock(kCLOCK_PortC);
-    CLOCK_EnableClock(kCLOCK_PortD);
-    CLOCK_EnableClock(kCLOCK_PortE);
+
     
     /* TRST */
     PORTB->PCR[10] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
@@ -316,9 +310,25 @@ int main(void)
     BOARD_BootClockRUN();
     BOARD_InitDebugConsole();
     MPU_Enable(MPU, false);
+    
+    CLOCK_EnableClock(kCLOCK_PortA);
+    CLOCK_EnableClock(kCLOCK_PortB);
+    CLOCK_EnableClock(kCLOCK_PortC);
+    CLOCK_EnableClock(kCLOCK_PortD);
+    CLOCK_EnableClock(kCLOCK_PortE);
+    
     LED_RED_INIT(1);
     LED_GREEN_INIT(1);
     LED_BLUE_INIT(1);
+    
+    PORTC->PCR[CUSTOM_GPIO_OK] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
+    GPIOC->PDDR |= (1<<CUSTOM_GPIO_OK);
+    PCout(CUSTOM_GPIO_OK) = 0;
+    
+    PORTC->PCR[CUSTOM_GPIO_ERR] = PORT_PCR_MUX(1) | PORT_PCR_DSE_MASK;
+    GPIOC->PDDR |= (1<<CUSTOM_GPIO_ERR);
+    PCout(CUSTOM_GPIO_ERR) = 0;
+
     
     PRINTF("CoreClock:%dHz.\r\n", CLOCK_GetCoreSysClkFreq());
     PRINTF("init SD card...\r\n");
@@ -328,6 +338,7 @@ int main(void)
     if (f_mount(&g_fileSystem, driverNumberBuffer, 0U))
     {
         PRINTF("Mount volume failed.\r\n");
+        PCout(CUSTOM_GPIO_ERR) = 1;
         return -1;
     }
     
@@ -336,6 +347,7 @@ int main(void)
     if (error)
     {
         PRINTF("Change drive failed.\r\n");
+        PCout(CUSTOM_GPIO_ERR) = 1;
         return -1;
     }
 #endif
@@ -357,6 +369,7 @@ int main(void)
     {
         printf("Cannot find %s!\r\n", "/setting.ini");
         LED_BLUE_ON();
+        PCout(CUSTOM_GPIO_ERR) = 1;
         while(1);
     }
     else
@@ -446,6 +459,7 @@ int main(void)
     SWD_PinDeInit();
     printf("Press reset pin for next download...\r\n");
     
+    PCout(CUSTOM_GPIO_OK) = 1;
     while(1)
     {
         LED_GREEN_TOGGLE();

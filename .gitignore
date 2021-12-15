@@ -1,76 +1,66 @@
-# Mac files
-.DS_Store
-
-# Compiled Object files
-*.slo
-*.lo
+# Object files
 *.o
-tmp/
+*.ko
+*.o.*
+*.uvgui.*
+*.bat
+*.__i
+*.dbgdt
+*.tra
+*.iex
+*.sim
+*.pbd
+*.browse
+*.tmp
+*.ewt
+*.db
+*.__ia
+*.dni
+*.wsdt
+*.pbi
+*.bin
+*.cout
+*.crf
+*.d
+*.sct
+*.htm
+*.map
+*.axf
+*.lnp
+*.txt
+*.xcl
+*.pbi.xcl
+*.ini
+*.Scr
+*.lst
+*.uvgui*
+output
+Doc
+settings
+Debug
+SI
+Release
+lib_html
+d4d
+net_5000
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-
-# Compiled Static libraries
-*.lai
-*.la
+# Libraries
 *.a
 
-# Python
-*.py[cod]
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
 
-# Eclipse Project Files
-.cproject
-.project
-.pydevproject
-
-# uvision Project Files
-*.uvproj
-*.uvopt
-
-# generated project files
-projectfiles
-
-*.plg
-*.map
-*.lst
-*.lnp
-*.htm
-*.dep
-*.d
-*.crf
-*.bak
-
-*.axf
-*.S19
-*.bin
+# Executables
+*.exe
+*.out
+*.app
 *.hex
+
+# Project files
+*.plg
+*.Yandld
 *.dep
-*.FLM
-*.log
-
-# JLink files
-JLink*.*
-
-# Output directories
-Output
-Lst
-Obj
-
-# cscope
-cscope.*
-
-# ctags
-tags
-
-# Doxygen tags and html output
-*.tag
-*.html
-debug.txt
-docs
-
-# PyCharm project files
-.idea
-
-# virtual environment
-venv/
+*.bak
