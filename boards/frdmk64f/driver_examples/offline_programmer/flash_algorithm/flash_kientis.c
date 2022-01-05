@@ -59,7 +59,7 @@ uint8_t target_flash_unlock_sequence(void)
             /* keep reading until procedure is complete */
             if(SWJ_ReadAP(MDM_CTRL, &val))
             {
-                printf("failed\r\n");
+                printf("read MDM_CTRL failed\r\n");
                  return CH_ERR;
             }
             if ((val & 0x01) == 0x00)

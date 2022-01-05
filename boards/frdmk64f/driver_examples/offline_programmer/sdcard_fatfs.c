@@ -44,6 +44,7 @@ AlgorithmParams_t AlgorithmTbl[] =
     {"xxFN256",                     0x40052000u,    WDOG_TYPE_16,    4096,   PGM4},
     {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
     {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
+    {"KE02",                        0x40052000u,    WDOG_TYPE_8,     512,    PGM4},
 };
 
 /* buffer size (in byte) for read/write operations */
@@ -70,6 +71,7 @@ static AlgorithmParams_t Algorithm;
 static uint32_t FlashOption = 0;
 static uint32_t KE_TRIM = 0;
 static uint32_t KE_EEP = 0;
+static uint32_t SWD_DELAY = 5;
 uint8_t trim_val = 0x4C;
     
 void ERROR_TRACE(const char *log)
@@ -360,7 +362,7 @@ int main(void)
         printf("%d: %-16s WDOG:%d SEC_SIZE:%d %s\r\n", i, AlgorithmTbl[i].name, AlgorithmTbl[i].wdog_type, AlgorithmTbl[i].sector_size, (AlgorithmTbl[i].pgm == 6)?("PGM4"):("PGM8"));
     }
     
-    SWD_PinInit();
+
     
     /* reading configuraton */
     UINT cbr;
@@ -400,6 +402,14 @@ int main(void)
             KE_EEP = strtoul(p+strlen("KE_EEP="), 0, 0);
         }
         printf("KE_EEP:%d\r\n", KE_EEP);
+        
+        p = strstr((const char*)ImageBuf, "SWD_DELAY=");
+        if(p)
+        {
+            SWD_DELAY = strtoul(p+strlen("SWD_DELAY="), 0, 0);
+        }
+        printf("SWD_DELAY:%d\r\n", SWD_DELAY);
+        
     }
     
     
@@ -415,10 +425,18 @@ int main(void)
         read_image(TARGET_EEP_IAMGE_PATH, &f_ke_eep_image);
     }
     
-    delay(30);
+    
+
+    
+    set_swd_speed(10);
+    SWD_PinInit();
     
     /* unlock Kinetis */
     printf("unlock...\r\n");
+    TRST(0);
+    delay(10);
+    TRST(1);
+    delay(10);
     target_flash_unlock_sequence();
     
     /* prepare download */
@@ -432,10 +450,9 @@ int main(void)
         measure_freq(&trim_val);
     }
     
+    set_swd_speed(SWD_DELAY);
     /* program main image */
     SWJ_SetTargetState(RESET_PROGRAM);
-    set_swd_speed(1);
-    
     program_image(&f_pimage, &flash_main, 0x00000000, Algorithm.sector_size);
     f_close(&f_pimage);
     
@@ -447,9 +464,6 @@ int main(void)
         f_close(&f_pimage);
     }
 
-    
-
-    set_swd_speed(50);
     /* release core and run target */
     SWJ_WriteAP(0x01000004, 0x00);
     val = 0;
