@@ -162,10 +162,10 @@ uint8_t target_flash_program_page(const target_flash_t* flash, uint32_t addr, ui
 
     // call a target dependent function to check if
     // we don't want to write specific bits (flash security bits, ...)
-    if (security_bits_set(addr, buf, size) == 1)
-    {
-        return CH_MESS_ERASE_DISABLED;
-    }
+//    if (security_bits_set(addr, buf, size) == 1)
+//    {
+//        return CH_MESS_ERASE_DISABLED;
+//    }
 
     // Program a page in target flash.
     if(swd_write_memory(flash->program_buffer, buf, size))
